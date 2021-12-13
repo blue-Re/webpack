@@ -1,0 +1,1 @@
+"serviceWorker"in navigator&&window.addEventListener("load",(()=>{navigator.serviceWorker.register("/service-worker.js").then((()=>{console.log("注册成功了")})).catch((()=>{console.log("注册失败了")}))}));

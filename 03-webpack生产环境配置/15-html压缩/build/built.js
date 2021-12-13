@@ -1,0 +1,1 @@
+console.log(3),new Promise(((e,o)=>{setInterval((()=>{console.log("111"),e()}),1e3)}));
