@@ -2180,3 +2180,234 @@ module.exports = {
 }
 ```
 
+## 五、webpack5
+
+关于webpack5的一些写法，这里主要是对loader的理解
+
+`loaderOne.js`
+
+```js
+
+// loader的本质是一个函数
+
+// 同步 loader
+// 第一种同步执行的写法
+// module.exports = function (content, map, meta) {
+//   console.log('11111111');
+  
+//   return content
+// }
+
+// 第二种同步执行的写法
+module.exports = function (content, map, meta) {
+  console.log(111);
+
+  this.callback(null, content, map, meta)
+}
+
+// 每次解析loader都会去执行对应的pitch方法
+module.exports.pitch = function () {
+  console.log('pitch 111111');
+}
+
+```
+
+`loaderTwo.js`
+
+```js
+
+// loader的本质是一个函数
+// 同步loader
+// module.exports = function (content, map, meta) {
+//   console.log('22222222');
+
+//   return content
+// }
+
+// 异步loader(推荐使用)
+module.exports = function (content, map, meta) {
+  console.log(222);
+
+  const callback = this.async()
+
+  setTimeout(() => {
+    callback(null, content)
+  }, 1000)
+}
+
+// 每次解析loader都会去执行对应的pitch方法
+module.exports.pitch = function () {
+  console.log('pitch 222');
+}
+```
+
+`loaderThree.js`
+
+```js
+const { getOptions } = require('loader-utils')
+// 这个库专门用来验证 loader 是否符合规范
+const { validate } = require('schema-utils')
+const schema = require('./schema.json')
+
+// loader的本质是一个函数
+module.exports = function (content, map, meta) {
+  /* 有时我们需要知道loader的配置项，需要去下载一个 npm i loader-utils -D */
+  const options = getOptions(this);
+  console.log('333333', options);
+
+  // 校验 options 是否合法
+  validate(schema, options, {
+    name: 'loaderThree'
+  })
+  return content
+}
+
+// 每次解析loader都会去执行对应的pitch方法
+module.exports.pitch = function () {
+  console.log('pitch 333');
+}
+```
+
+`webpack.config.js`
+
+```js
+const path = require('path')
+
+module.exports = {
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        // loader: path.resolve(__dirname, 'loaders', 'loaderOne')
+        // loader: 'loaderOne'
+
+        // 解析 loader 会按照从上往下的顺序执行，每次解析 loader 就会去调用对应 loader 的 pitch 方法
+        use: [
+          'loaderOne',
+          'loaderTwo',
+          {
+            loader: 'loaderThree',
+            options: {
+              name: 'zhangsan'
+            }
+          }
+        ]
+      }
+    ]
+  },
+  // 配置解析loader规则
+  resolveLoader: {
+    modules: [
+      'node_modules',
+      path.resolve(__dirname, 'loaders'), // 解析路径
+    ]
+  },
+  mode: 'development'
+}
+```
+
+匹配规则的 `schema.json`文件
+
+```json
+
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type" : "string",
+      "description": "名称"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+## 六、自定义 babelLoader
+
+`babelLoader.js`
+
+```js
+// 自定义的 babelLoader
+
+// 获取 options 的配置
+const { getOptions } = require('loader-utils')
+const { validate } = require('schema-utils')
+const babel = require('@babel/core')
+const util = require('util')
+
+const babelSchema = require('./babelLoaderSchema.json')
+
+// babel.transform 用来编译代码的方法，是一个普通异步方法
+// util.promisify 将普通异步方法转化成基于promise的异步方法
+const transform = util.promisify(babel.transform)
+
+module.exports = function (content, map, meta) {
+  // 获取 loader 的 options 配置
+  const options = getOptions(this) || {};
+  // 校验 babelLoader 
+  validate(babelSchema, options, {
+    name: 'Babel Loader'
+  })
+
+  // 创建异步
+  const callback = this.async()
+
+  // 使用 babel 编译代码
+  transform(content, options)
+    .then(({code, map}) => callback(null, code, map, meta))
+    .catch((e) => callback(e))
+}
+```
+
+loader匹配规则
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "presets": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+`webpack.config.js`
+
+```js
+const path = require('path')
+
+module.exports = {
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        loader: 'babelLoader',
+        options: {
+          presets: [
+            '@babel/preset-env'
+          ]
+        }
+      }
+    ]
+  },
+  // 配置解析loader规则
+  resolveLoader: {
+    modules: [
+      'node_modules',
+      path.resolve(__dirname, 'loaders'), // 解析路径
+    ]
+  },
+  mode: 'development'
+}
+```
+
+## 七、tapable的使用
+
+首先需要安装相关依赖
+
+```
+npm i tapable -D
+```
+
