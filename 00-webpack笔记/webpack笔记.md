@@ -2411,3 +2411,291 @@ module.exports = {
 npm i tapable -D
 ```
 
+```js
+const { SyncHook, SyncBailHook, AsyncParallelHook, AsyncSeriesHook } = require('tapable')
+
+class Lesson {
+  constructor() {
+    // 初始化 hooks容器
+    this.hooks = {
+      // 同步 hooks 任务依次执行 
+      // go: new SyncHook(['address']) 
+      go: new SyncBailHook(['address']), // 一旦遇到返回值就停止执行
+
+      // 异步 hooks
+      // AsyncParallelHook 异步并行
+      // leave: new AsyncParallelHook(['name', 'age']),
+
+      // AsyncSeriesHook 异步串行 先执行一个再执行一个
+      leave: new AsyncSeriesHook(['name', 'age'])
+    }
+  }
+  tap() {
+    // 往hooks容器中注册 事件/ 添加回调函数
+    this.hooks.go.tap('class0318', (address) => {
+      console.log('class0318', address);
+    })
+    this.hooks.go.tap('class0410', (address) => {
+      console.log('class0410', address);
+    })
+    // 第一种异步调用方法
+    this.hooks.leave.tapAsync('class0510', (name, age, callback) => {
+      setTimeout(() => {
+        console.log('class0510', name, age);
+        callback()
+      }, 2000)
+    })
+    // 第二种异步调用方法
+    this.hooks.leave.tapPromise('class0510', (name, age) => {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          console.log('class0610', name, age);
+          resolve()
+        }, 1000)
+      })
+    })
+  }
+  start() {
+    // 触发 hooks(会触发容器内所有钩子)
+    this.hooks.go.call('c318')
+    this.hooks.leave.callAsync('jack', 19, function () {
+      // 代表 leave 容器 所有的钩子都触发完毕
+      console.log('leave 容器中所有的钩子触发完毕');
+    })
+  }
+}
+
+const l = new Lesson()
+l.tap()
+l.start()
+```
+
+## 八、complier的hooks的使用
+
+```js
+class PluginOne {
+  // 在 new 调用 插件时 会触发 apply 这个方法
+  apply(complier) {
+    complier.hooks.emit.tap('PluginOne', (compilation) => {
+      console.log('emit.tap');
+    })
+
+    complier.hooks.emit.tapAsync('PluginOne', (compilation, callback) => {
+      setTimeout(() => {
+        console.log('tapAsync.tap');
+        callback()
+      }, 1000)
+    })
+
+    complier.hooks.emit.tapPromise('PluginOne', (compilation) => {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          console.log('tapAsync.tap');
+          resolve()
+        }, 1000)
+      })
+    })
+
+    complier.hooks.afterEmit.tap('PluginOne', (compilation) => {
+      console.log('afterEmit.tap');
+    })
+
+    complier.hooks.done.tap('PluginOne', (compilation) => {
+      console.log('done.tap');
+    })
+  }
+}
+
+module.exports = PluginOne
+```
+
+```js
+const PluginOne = require('./plugins/PluginOne')
+
+module.exports = {
+  plugins:[
+    new PluginOne()
+  ]
+}
+```
+
+## 九、compilation的使用
+
+```js
+const PluginTwo = require('./plugins/PluginTwo')
+module.exports = {
+  plugins:[
+    new PluginTwo()
+  ]
+}
+```
+
+```js
+const fs = require('fs')
+const util = require('util')
+const path = require('path')
+
+const webpack = require('webpack')
+// RawSource可以将 数据变成对象
+const { RawSource } = webpack.sources
+
+// 将fs.readFile方法变成基于 promise 风格的异步方法
+const readFile = util.promisify(fs.readFile)
+
+class PluginTwo {
+  apply(compiler) {
+    // 初始化 compilation 钩子
+    compiler.hooks.thisCompilation.tap('PluginTwo', (compilation) => {
+      // 添加资源
+      compilation.hooks.additionalAssets.tapAsync('PluginTwo', async (callback) => {
+        const content = 'hello plugin two'
+
+        // 往输出的资源中，添加一个 a.txt
+        compilation.assets['a.txt'] = {
+          // 文件大小
+          size() {
+            return content.length;
+          },
+          // 文件内容
+          source() {
+            return content;
+          }
+        }
+
+        const data = await readFile(path.resolve(__dirname, 'b.txt'))
+        // 第一种
+        // compilation.assets['b.txt'] = new RawSource(data)
+
+        compilation.emitAsset('b.txt', new RawSource(data))
+        callback()
+      })
+    })
+  }
+}
+
+module.exports = PluginTwo
+```
+
+## 十、自定义copy-webpack-plugin
+
+`webpack.config.js`
+
+```js
+const CopyWebpackPlugin = require("./plugins/CopyWebpackPlugin");
+
+
+module.exports = {
+  plugins: [
+    new CopyWebpackPlugin({
+      from: 'public',
+      to: 'css',
+      ignore:['**/index.html']
+    })
+  ]
+}
+```
+
+`CopyWebpackPlugin.js`
+
+```js
+// 写一个插件 将 public 的资源复制到dist文件夹下
+
+const { validate } = require('schema-utils')
+const schema = require('./schema.json')
+// 专门用来匹配文件列表
+const globby = require('globby')
+const path = require('path')
+const { promisify } = require('util')
+
+const webpack = require('webpack')
+
+const { RawSource } = webpack.sources
+const readFile = promisify(fs.readFile)
+
+
+class CopyWebpackPlugin {
+  constructor(options = {}) {
+    // 验证options是否符合规范
+    validate(schema, options, {
+      name: "CopyWebpackPlugin"
+    })
+    this.options = options
+  }
+
+  apply(compiler) {
+    // 初始化compilation
+    compiler.hooks.thisCompilation.tap('CopyWebpackPlugin', (compilation) => {
+      // 添加资源的 hooks
+      compilation.hooks.additionalAssets.tapAsync('CopyWebpackPlugin', async callback => {
+        // 将 from 中的资源复制到 to 中，输出出去
+        const { from, ignore } = this.options;
+        const to = this.options.to ? this.options.to : '.'
+
+        // context 就是 webpack 的配置
+        // 运行指令的目录
+        const context = compiler.options.context;
+        // 将输入路径变为绝对路径
+        const absoluteFrom = path.isAbsolute(from) ? from : path.resolve(context, from);
+
+        // 1. 过滤掉 ignore的文件
+        // globby(要处理的文件夹，options)
+        const paths = await globby(absoluteFrom, { ignore }) // 所有要加载的文件路径数组
+        // 2. 读取 paths 中所有资源
+        const files = await Promise.all(
+          paths.map(async absolutePath => {
+            // 读取文件
+            const data = await readFile(absolutePath)
+            // basename 得到最后的文件名称
+            const relativePath = path.basename(absolutePath)
+
+            const filename = path.join(to, relativePath)
+            
+            return {
+              // 文件数据
+              data,
+              //文件名称
+              filename
+            }
+          })
+        )
+        // 3. 生成webpack格式的资源
+        const assets = files.map(file => {
+          const source = new RawSource(file.data)
+          return {
+            source,
+            filename: file.filename
+          }
+        })
+        // 4. 添加compilation中，输出出去
+        assets.forEach(asset => {
+          compilation.emitAsset(asset.filename, asset.source)
+        })
+        callback()
+      })
+    })
+  }
+}
+
+module.exports = CopyWebpackPlugin
+```
+
+`schema.json`
+
+```js
+{
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    },
+    "ignore": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
